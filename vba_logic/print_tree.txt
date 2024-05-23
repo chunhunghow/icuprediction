@@ -1,0 +1,53 @@
+Sub IcuRiskModel()
+  Dim SOFA_adm As Double
+  Dim APACHE_adm As Double
+  Dim SOFA_disc As Double
+  Dim APACHE_disc As Double
+  Dim icu_los As Double
+  Dim mv_duration As Double
+  Dim cci As Double
+  Dim outcome(0) As Double
+
+SOFA_adm = Range("A2").Value
+APACHE_adm = Range("B2").Value
+SOFA_disc = Range("C2").Value
+APACHE_disc = Range("D2").Value
+icu_los = Range("E2").Value
+mv_duration = Range("F2").Value
+cci = Range("G2").Value
+
+If mv_duration <= 46.50 Then
+ If mv_duration <= 16.50 Then
+  If mv_duration <= 13.50 Then
+   prob = 0
+  Else: 
+   prob = 0
+  End If
+ Else: 
+  If icu_los <= 215.35 Then
+   prob = 0
+  Else: 
+   prob = 1
+  End If
+End If
+Else: 
+ If SOFA_disc <= 2.50 Then
+  If APACHE_adm <= 17.50 Then
+   prob = 0
+  Else: 
+   prob = 1
+  End If
+ Else: 
+  If cci <= 4.50 Then
+   prob = 1
+  Else: 
+   prob = 1
+  End If
+End If
+
+outcome(0) = prob
+
+End If
+If Application.WorksheetFunction.Average(outcome) > 0.5 Then prob = 1 Else: prob = 0
+Range("H2").Value = prob
+End Sub

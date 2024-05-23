@@ -1,0 +1,189 @@
+--**********************************************************************
+--Requestor/Department	: Kansal Amit/Intensive Care Medicine
+--Request Date			: 04 Jan 2021
+--EPAS Request ID		: RF2100026-01
+--Content				: Patient Base of MV Patients
+--Writer				: Sylvester Lai
+--**********************************************************************
+--Version 1.0			: 19/03/2021	Sylvester Lai	Initial Script
+--Version 1.1			: 01/04/2021	Sylvester Lai	Added Hospital Admission Time
+--Version 1.2			: 01/06/2021	Sylvester Lai	Added Information about patient's previous admission
+--Version 1.3			: 04/06/2021	Sylvester Lai	Added Information about patient's current admission
+--Version 1.4			: 06/07/2021	Sylvester Lai	Removed MV filter in patient list
+--**********************************************************************
+
+
+select 
+	 MV_Patients.[Encounter ID] as [ICU Encounter ID]
+	,MV_Patients.[Episode ID] as [ICU Episode ID]
+	,MV_Patients.[Patient ID] as [ICU Patient ID]
+	,MV_Patients.[Patient Class Before ICU] as [Patient Class]
+	,MV_Patients.[Admission Type Before ICU] as [Admission Type]
+	,MV_Patients.[Department before ICU] as [ICU Department]
+	,MV_Patients.[Admission Source before ICU] as [ICU Admission Source] 
+	,MV_Patients.Age_at_Admission as [Age at Admission]
+	,MV_Patients.[Hosptial Admission Time]
+	,MV_Patients.Patient_Sex as [Gender]
+	,MV_Patients.FLO_MEAS_NAME as [Flowsheet Name]
+	,MV_Patients.MEAS_VALUE as [Flowsheet Value]
+	--,LOS.[ICU Admission Time]
+	--,LOS.[ICU Discharge Time]
+	--,LOS.[ICU LOS]
+	--,LOS.[Hospital LOS]
+	,CASE WHEN MV_Patients.MEAS_VALUE = 'Mechanical Ventilator' THEN DISPOSITION.[Discharge Outcome] ELSE NULL END AS [Discharge Outcome]
+	--,READMIT.[Readmission]
+	--,PREADMIT.*
+into 
+	#TEMP_MV_PATIENTS
+from (
+
+select distinct
+	a.PAT_ENC_CSN_ID as [Encounter ID]
+	,IP_EPISODE_LINK.EPISODE_ID as [Episode ID]
+	,a.PAT_ID as [Patient ID]
+	,a.HOSP_ADMSN_TIME as [Hosptial Admission Time]
+	,f.PAT_AGE_YEARS_AT_ENC as [Age_at_Admission]
+	,h.NAME as [Patient_Sex]
+	,d.FLO_MEAS_NAME
+	,c.MEAS_VALUE
+	,First_Pat_Class.NAME as [Patient Class Before ICU]
+	,First_Admission_Class.NAME as [Admission Type Before ICU]
+	,FIRSTADMIT_DEP.DEPARTMENT_NAME as [Department before ICU]
+	,FIRSTSOURCE.NAME as [Admission Source before ICU]
+from PAT_ENC_HSP a
+--join to flowsheet
+left join IP_FLWSHT_REC b on a.INPATIENT_DATA_ID = b.INPATIENT_DATA_ID
+left join IP_FLWSHT_MEAS c on b.FSD_ID = c.FSD_ID and (c.FLO_MEAS_ID = '3047610003')
+left join IP_FLO_GP_DATA d on c.FLO_MEAS_ID = d.FLO_MEAS_ID
+--join to department for icu
+left join CLARITY_DEP e on a.DEPARTMENT_ID = e.DEPARTMENT_ID
+LEFT JOIN CLARITY_DEP FIRSTADMIT_DEP on a.DEPARTMENT_ID = FIRSTADMIT_DEP.DEPARTMENT_ID
+--join for age on admission
+left join V_PAT_ENC_FACT f on a.PAT_ENC_CSN_ID = f.PAT_ENC_CSN_ID
+--join to patient data for gender
+left join PATIENT g on a.PAT_ID = g.PAT_ID
+left join ZC_SEX h on g.SEX_C = h.RCPT_MEM_SEX_C
+--NUH filter
+inner join X_V_NUHS_ENCOUNTERS on X_V_NUHS_ENCOUNTERS.PAT_ENC_CSN_ID = a.PAT_ENC_CSN_ID
+left join V_PATIENT_EXCLUSION on V_PATIENT_EXCLUSION.PAT_ID = a.PAT_ID
+--join for episode IDs
+left join IP_EPISODE_LINK on a.PAT_ENC_CSN_ID = IP_EPISODE_LINK.PAT_ENC_CSN_ID
+--
+left join ZC_PAT_CLASS First_Pat_Class on a.ADT_PAT_CLASS_C = First_Pat_Class.ADT_PAT_CLASS_C
+left join ZC_HOSP_ADMSN_TYPE First_Admission_Class on a.HOSP_ADMSN_TYPE_C = First_Admission_Class.HOSP_ADMSN_TYPE_C
+left join ZC_ADMIT_SOURCE FIRSTSOURCE on a.ADMIT_SOURCE_C = FIRSTSOURCE.ADMIT_SOURCE_C
+--
+where 
+	1=1
+	--and (a.INP_ADM_DATE is not null    
+	--or a.ED_EPISODE_ID is not null)   
+	and a.CONTACT_DATE >= CAST('2016-01-01' AS date)
+	and a.CONTACT_DATE <= CAST('2019-12-31' AS date)
+	and e.DEPARTMENT_NAME in ('NTF ICU (MEDICAL ICU)','NTF ICU','NTF CARDIAC ICU','NTF NEURO ICU','NTF SURGICAL ICU','NTF ICU (TRAUMA)','NTF ICU (SURGICAL ICU)','NTF ICU (CORONARY CARE UNIT)','NTF ICU (MEDICAL ICU)','WARD ICU/HD') --main 'dep' is WARD ICU/HD for TST environment
+	and e.REV_LOC_ID in ('10101') --10101 is NTFGH, 10201 is JCH, 10501 is JMC
+	and f.PAT_AGE_YEARS_AT_ENC >= 18
+	--and (c.FLO_MEAS_ID = '3047610003')
+	--and c.MEAS_VALUE = 'Mechanical Ventilator'
+	and V_PATIENT_EXCLUSION.PAT_ID is null
+) MV_Patients
+--------------------------------------------------------------------------------------------LOS
+--left join
+--(
+--	select 
+-- aa.IN_DTTM as [ICU Admission Time]
+--,aa.OUT_DTTM as [ICU Discharge Time]
+--,datediff(day,aa.IN_DTTM,aa.OUT_DTTM) as [ICU LOS]
+--,datediff(day,a.HOSP_ADMSN_TIME,a.HOSP_DISCH_TIME) as [Hospital LOS]
+--,a.HOSP_ADMSN_TIME as [Hospital Admission Time]
+--,aa.PAT_ENC_CSN_ID as [Encounter ID]
+----,aa.* 
+--from F_PAT_ICU_LOCATION aa
+--left join PAT_ENC_HSP a on aa.PAT_ENC_CSN_ID = a.PAT_ENC_CSN_ID
+--left join CLARITY_DEP c on aa.DEPARTMENT_ID = c.DEPARTMENT_ID
+--where DEPARTMENT_NAME in ('NTF ICU (MEDICAL ICU)','NTF ICU','NTF CARDIAC ICU','NTF NEURO ICU','NTF SURGICAL ICU','NTF ICU (TRAUMA)','NTF ICU (SURGICAL ICU)','NTF ICU (CORONARY CARE UNIT)','NTF ICU (MEDICAL ICU)','WARD ICU/HD') --main 'dep' is WARD ICU/HD for TST environment
+--) LOS
+--on MV_Patients.[Encounter ID] = LOS.[Encounter ID]
+--------------------------------------------------------------------------------------------READMISSION
+--left join
+--(
+--select distinct
+-- FIRSTADMIT.PAT_ENC_CSN_ID
+--,FIRSTADMIT.PAT_ID
+--,'Y' as [Readmission]
+
+--FROM PAT_ENC_HSP FIRSTADMIT
+--LEFT JOIN F_IP_HSP_ADMISSION ON FIRSTADMIT.PAT_ENC_CSN_ID = F_IP_HSP_ADMISSION.PAT_ENC_CSN_ID
+--INNER JOIN F_IP_READMISSION_LINK  ON F_IP_READMISSION_LINK.INDEX_PAT_ENC_CSN_ID = F_IP_HSP_ADMISSION.PAT_ENC_CSN_ID 
+--LEFT JOIN F_IP_HSP_ADMISSION READMIT ON READMIT.PAT_ENC_CSN_ID = F_IP_READMISSION_LINK.READMIT_PAT_ENC_CSN_ID 
+--LEFT JOIN PAT_ENC_HSP NEXTADMIT ON NEXTADMIT.PAT_ENC_CSN_ID = READMIT.PAT_ENC_CSN_ID
+--LEFT JOIN ZC_DISCH_DISP ON FIRSTADMIT.DISCH_DISP_C = ZC_DISCH_DISP.DISCH_DISP_C
+
+--LEFT JOIN CLARITY_DEP FIRSTADMIT_DEP on FIRSTADMIT.DEPARTMENT_ID = FIRSTADMIT_DEP.DEPARTMENT_ID
+--LEFT JOIN CLARITY_DEP READMIT_DEP on NEXTADMIT.DEPARTMENT_ID = READMIT_DEP.DEPARTMENT_ID
+
+--where FLOOR(NEXTADMIT.PAT_ENC_DATE_REAL) - FLOOR(FIRSTADMIT.PAT_ENC_DATE_REAL) <= 1
+----check if first admission is ICU
+--AND FIRSTADMIT_DEP.DEPARTMENT_NAME in ('NTF ICU (MEDICAL ICU)','NTF ICU','NTF CARDIAC ICU','NTF NEURO ICU','NTF SURGICAL ICU','NTF ICU (TRAUMA)','NTF ICU (SURGICAL ICU)','NTF ICU (CORONARY CARE UNIT)','NTF ICU (MEDICAL ICU)','WARD ICU/HD') --main 'dep' is WARD ICU/HD for TST environment
+----check if second admission is ICU
+--AND READMIT_DEP.DEPARTMENT_NAME in ('NTF ICU (MEDICAL ICU)','NTF ICU','NTF CARDIAC ICU','NTF NEURO ICU','NTF SURGICAL ICU','NTF ICU (TRAUMA)','NTF ICU (SURGICAL ICU)','NTF ICU (CORONARY CARE UNIT)','NTF ICU (MEDICAL ICU)','WARD ICU/HD') --main 'dep' is WARD ICU/HD for TST environment
+--) READMIT
+--on MV_Patients.[Encounter ID] = READMIT.PAT_ENC_CSN_ID
+------------------------------------------------------------------------------------------Discharge Outcome
+left join
+(
+select distinct
+ FIRSTADMIT.PAT_ENC_CSN_ID
+,FIRSTADMIT.PAT_ID
+,ZC_DISCH_DISP.NAME as [Discharge Outcome] 
+
+FROM PAT_ENC_HSP FIRSTADMIT
+LEFT JOIN ZC_DISCH_DISP ON FIRSTADMIT.DISCH_DISP_C = ZC_DISCH_DISP.DISCH_DISP_C
+) DISPOSITION
+on MV_Patients.[Encounter ID] = DISPOSITION.PAT_ENC_CSN_ID
+--------------------------------------------------------------------------------------------PRE-ICU
+--left join
+--(
+--select distinct
+-- FIRSTADMIT.PAT_ENC_CSN_ID [Pre Admit CSN 2]
+--,First_Pat_Class.NAME as [Patient Class Before ICU 2]
+--,First_Admission_Class.NAME as [Admission Type Before ICU 2]
+--,FIRSTADMIT_DEP.DEPARTMENT_NAME as [Department before ICU 2]
+--,FIRSTSOURCE.NAME as [Admission Source before ICU 2]
+--,NEXTADMIT.PAT_ENC_CSN_ID [ICU CSN 2]
+--,NEXTADMIT.PAT_ID [ICU Patient ID 2]
+--,Current_Pat_Class.name as [Patient Class in ICU 2]
+--,Current_Admission_Class.NAME as [Admission Type in ICU 2]
+--,NEXTADMIT_DEP.DEPARTMENT_NAME as [Department in ICU 2]
+--,NEXTSOURCE.NAME as [Admission Source in ICU 2]
+
+--FROM PAT_ENC_HSP FIRSTADMIT
+--LEFT JOIN F_IP_HSP_ADMISSION ON FIRSTADMIT.PAT_ENC_CSN_ID = F_IP_HSP_ADMISSION.PAT_ENC_CSN_ID
+--INNER JOIN F_IP_READMISSION_LINK  ON F_IP_READMISSION_LINK.INDEX_PAT_ENC_CSN_ID = F_IP_HSP_ADMISSION.PAT_ENC_CSN_ID 
+--LEFT JOIN F_IP_HSP_ADMISSION READMIT ON READMIT.PAT_ENC_CSN_ID = F_IP_READMISSION_LINK.READMIT_PAT_ENC_CSN_ID 
+--LEFT JOIN PAT_ENC_HSP NEXTADMIT ON NEXTADMIT.PAT_ENC_CSN_ID = READMIT.PAT_ENC_CSN_ID
+--LEFT JOIN ZC_DISCH_DISP ON FIRSTADMIT.DISCH_DISP_C = ZC_DISCH_DISP.DISCH_DISP_C
+
+--LEFT JOIN CLARITY_DEP FIRSTADMIT_DEP on FIRSTADMIT.DEPARTMENT_ID = FIRSTADMIT_DEP.DEPARTMENT_ID
+--LEFT JOIN CLARITY_DEP NEXTADMIT_DEP on NEXTADMIT.DEPARTMENT_ID = NEXTADMIT_DEP.DEPARTMENT_ID
+
+--left join ZC_PAT_CLASS First_Pat_Class on FIRSTADMIT.ADT_PAT_CLASS_C = First_Pat_Class.ADT_PAT_CLASS_C
+--left join ZC_HOSP_ADMSN_TYPE First_Admission_Class on FIRSTADMIT.HOSP_ADMSN_TYPE_C = First_Admission_Class.HOSP_ADMSN_TYPE_C
+
+--left join ZC_PAT_CLASS Current_Pat_Class on NEXTADMIT.ADT_PAT_CLASS_C = Current_Pat_Class.ADT_PAT_CLASS_C
+--left join ZC_HOSP_ADMSN_TYPE Current_Admission_Class on NEXTADMIT.HOSP_ADMSN_TYPE_C = Current_Admission_Class.HOSP_ADMSN_TYPE_C
+
+--left join ZC_ADMIT_SOURCE FIRSTSOURCE on FIRSTADMIT.ADMIT_SOURCE_C = FIRSTSOURCE.ADMIT_SOURCE_C
+--left join ZC_ADMIT_SOURCE NEXTSOURCE on NEXTADMIT.ADMIT_SOURCE_C = NEXTSOURCE.ADMIT_SOURCE_C
+--where FLOOR(NEXTADMIT.PAT_ENC_DATE_REAL) - FLOOR(FIRSTADMIT.PAT_ENC_DATE_REAL) <= 1
+
+
+--) PREADMIT
+--on MV_Patients.[Encounter ID] = PREADMIT.[ICU CSN 2]
+
+
+
+
+
+select * from #TEMP_MV_PATIENTS
+
+drop table #TEMP_MV_PATIENTS
